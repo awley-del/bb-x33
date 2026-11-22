@@ -12,3 +12,5 @@ def lookup_user(email):
 
 def run(cmd):
     return os.system("convert " + cmd)
+
+# trivial
