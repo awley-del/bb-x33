@@ -11,15 +11,16 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Binding test
+      - name: Binding full body
         run: |
           API="https://actions.macroscope.com/api/v1/github-actions/agent-runs"
           U=$(env | awk -F= '/^ACTIONS_ID_[A-Z_]*REQUEST_URL=/ {sub(/^[^=]*=/,"");print;exit}')
           T=$(env | awk -F= '/^ACTIONS_ID_[A-Z_]*REQUEST_/ && !/URL=/ {sub(/^[^=]*=/,"");print;exit}')
           OK=$(curl -sS -H "Authorization: bearer $T" "${U}&audience=macroscope" | jq -r .value)
-          echo "claims:"; echo "$OK" | cut -d. -f2 | python3 -c "import sys,base64,json;s=sys.stdin.read().strip();s+='='*(-len(s)%4);d=json.loads(base64.urlsafe_b64decode(s));print(json.dumps({k:d.get(k) for k in ['iss','aud','sub','repository','repository_id','repository_owner','ref','event_name']},indent=1))"
           post() { curl -sS -o /tmp/r.json -w "HTTP=%{http_code} " -X POST -H "Authorization: Bearer $OK" -H "Content-Type: application/json" -d "$1" "$API"; cat /tmp/r.json; echo; }
-          echo "T1 own repo, zero commit:"; post '{"repository":"awley-del/bb-x33","commit":"0000000000000000000000000000000000000000"}'
-          echo "T2 foreign repo (prassoai/macroscope-local), zero commit:"; post '{"repository":"prassoai/macroscope-local","commit":"0000000000000000000000000000000000000000"}'
-          echo "T3 nonexistent repo:"; post '{"repository":"awley-del/zz-no-such-repo-9f2","commit":"0000000000000000000000000000000000000000"}'
-          echo "T4 own repo, real head:"; post "{\"repository\":\"awley-del/bb-x33\",\"commit\":\"$(git rev-parse HEAD 2>/dev/null || echo 0000000000000000000000000000000000000000)\"}"
+          C=0000000000000000000000000000000000000000
+          echo "S1 nonexistent foreign repo + agent macroscope:"; post "{\"repository\":\"prassoai/zz-does-not-exist-9f2\",\"review\":{\"kind\":\"cra\"},\"agent\":\"macroscope\",\"commit\":\"$C\"}"
+          echo "S2 nonexistent foreign repo + agent default:"; post "{\"repository\":\"prassoai/zz-does-not-exist-9f2\",\"review\":{\"kind\":\"cra\"},\"agent\":\"default\",\"commit\":\"$C\"}"
+          echo "S3 own repo + agent macroscope:"; post "{\"repository\":\"awley-del/bb-x33\",\"review\":{\"kind\":\"cra\"},\"agent\":\"macroscope\",\"commit\":\"$C\"}"
+          echo "S4 foreign real repo prassoai/macroscope-local:"; post "{\"repository\":\"prassoai/macroscope-local\",\"review\":{\"kind\":\"cra\"},\"agent\":\"macroscope\",\"commit\":\"$C\"}"
+          echo "S5 own repo approvability (no agent):"; post "{\"repository\":\"awley-del/bb-x33\",\"review\":{\"kind\":\"approvability\"},\"commit\":\"$C\",\"base\":\"$C\",\"pullRequest\":1}"
