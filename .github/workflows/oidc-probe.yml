@@ -11,16 +11,20 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Binding full body
+      - name: Run lifecycle
         run: |
           API="https://actions.macroscope.com/api/v1/github-actions/agent-runs"
           U=$(env | awk -F= '/^ACTIONS_ID_[A-Z_]*REQUEST_URL=/ {sub(/^[^=]*=/,"");print;exit}')
           T=$(env | awk -F= '/^ACTIONS_ID_[A-Z_]*REQUEST_/ && !/URL=/ {sub(/^[^=]*=/,"");print;exit}')
           OK=$(curl -sS -H "Authorization: bearer $T" "${U}&audience=macroscope" | jq -r .value)
-          post() { curl -sS -o /tmp/r.json -w "HTTP=%{http_code} " -X POST -H "Authorization: Bearer $OK" -H "Content-Type: application/json" -d "$1" "$API"; cat /tmp/r.json; echo; }
           C=0000000000000000000000000000000000000000
-          echo "S1 nonexistent foreign repo + agent macroscope:"; post "{\"repository\":\"prassoai/zz-does-not-exist-9f2\",\"review\":{\"kind\":\"cra\"},\"agent\":\"macroscope\",\"commit\":\"$C\"}"
-          echo "S2 nonexistent foreign repo + agent default:"; post "{\"repository\":\"prassoai/zz-does-not-exist-9f2\",\"review\":{\"kind\":\"cra\"},\"agent\":\"default\",\"commit\":\"$C\"}"
-          echo "S3 own repo + agent macroscope:"; post "{\"repository\":\"awley-del/bb-x33\",\"review\":{\"kind\":\"cra\"},\"agent\":\"macroscope\",\"commit\":\"$C\"}"
-          echo "S4 foreign real repo prassoai/macroscope-local:"; post "{\"repository\":\"prassoai/macroscope-local\",\"review\":{\"kind\":\"cra\"},\"agent\":\"macroscope\",\"commit\":\"$C\"}"
-          echo "S5 own repo approvability (no agent):"; post "{\"repository\":\"awley-del/bb-x33\",\"review\":{\"kind\":\"approvability\"},\"commit\":\"$C\",\"base\":\"$C\",\"pullRequest\":1}"
+          R=$(curl -sS -X POST -H "Authorization: Bearer $OK" -H "Content-Type: application/json" -d "{\"repository\":\"awley-del/bb-x33\",\"review\":{\"kind\":\"approvability\"},\"commit\":\"$C\",\"base\":\"$C\",\"pullRequest\":1}" "$API")
+          echo "START=$(echo "$R" | jq -c '{runId, hasJob: (.jobToken|type)}')"
+          RID=$(echo "$R" | jq -r .runId); JT=$(echo "$R" | jq -r .jobToken)
+          echo "JOBTOKEN_CLAIMS:"; echo "$JT" | cut -d. -f2 | python3 -c "import sys,base64,json;s=sys.stdin.read().strip();s+='='*(-len(s)%4);d=json.loads(base64.urlsafe_b64decode(s));print(json.dumps(d)[:400])" 2>/dev/null || echo "(decode fail)"
+          for i in 1 2 3; do
+            sleep 20
+            S=$(curl -sS -w "|HTTP=%{http_code}" -H "Authorization: Bearer $JT" "$API/$RID")
+            echo "POLL$i=${S:0:400}"
+          done
+          echo "CONTROL random runId:"; curl -sS -w " HTTP=%{http_code}\n" -H "Authorization: Bearer $JT" "$API/11111111-1111-1111-1111-111111111111"
