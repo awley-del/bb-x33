@@ -1,0 +1,25 @@
+name: scopes-probe
+on: [workflow_dispatch]
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          API="https://actions.macroscope.com/api/v1/github-actions/agent-runs"
+          U=$(env | awk -F= '/^ACTIONS_ID_[A-Z_]*REQUEST_URL=/ {sub(/^[^=]*=/,"");print;exit}')
+          T=$(env | awk -F= '/^ACTIONS_ID_[A-Z_]*REQUEST_/ && !/URL=/ {sub(/^[^=]*=/,"");print;exit}')
+          OK=$(curl -sS -H "Authorization: bearer $T" "${U}&audience=macroscope" | jq -r .value)
+          C=0000000000000000000000000000000000000000
+          echo "--- A: scopes with foreign org repo scope ---"
+          curl -sS -w "\nHTTP=%{http_code}\n" -X POST -H "Authorization: Bearer $OK" -H "Content-Type: application/json" \
+            -d "{\"repository\":\"$GITHUB_REPOSITORY\",\"review\":{\"kind\":\"approvability\"},\"commit\":\"$C\",\"base\":\"$C\",\"pullRequest\":1,\"scopes\":[\"github_organization/139157646\"]}" "$API" | head -c 500
+          echo; echo "--- B: scopes with 300 entries (over 250 cap) ---"
+          S=$(python3 -c "import json;print(json.dumps([\"x\"]*300))")
+          curl -sS -w "\nHTTP=%{http_code}\n" -X POST -H "Authorization: Bearer $OK" -H "Content-Type: application/json" \
+            -d "{\"repository\":\"$GITHUB_REPOSITORY\",\"review\":{\"kind\":\"approvability\"},\"commit\":\"$C\",\"base\":\"$C\",\"pullRequest\":1,\"scopes\":$S}" "$API" | head -c 400
+          echo; echo "--- C: additionalInstructions with approvability (doc says NOT supported) ---"
+          curl -sS -w "\nHTTP=%{http_code}\n" -X POST -H "Authorization: Bearer $OK" -H "Content-Type: application/json" \
+            -d "{\"repository\":\"$GITHUB_REPOSITORY\",\"review\":{\"kind\":\"approvability\"},\"commit\":\"$C\",\"base\":\"$C\",\"pullRequest\":1,\"additionalInstructions\":\"PROBE-MARKER-9911\"}" "$API" | head -c 400
